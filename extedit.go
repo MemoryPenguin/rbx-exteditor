@@ -24,10 +24,10 @@ type script struct {
 }
 
 type context struct {
-	Scripts       map[string]script // All the scripts in the context.
-	DirPath       string            // The path to the temporary folder the context is using.
-	ScriptWatcher *fsnotify.Watcher // The FS watcher watching script files.
-	RbxEdits      map[string]bool   // Scripts that have been edited from ROBLOX and should have the next FS change ignored.
+	Scripts       map[string]script   // All the scripts in the context.
+	DirPath       string              // The path to the temporary folder the context is using.
+	ScriptWatcher *fsnotify.Watcher   // The FS watcher watching script files.
+	RbxEdits      map[string]struct{} // Scripts that have been edited from ROBLOX and should have the next FS change ignored.
 }
 
 func newContext() (*context, error) {
@@ -44,7 +44,7 @@ func newContext() (*context, error) {
 
 	ctx := &context{
 		Scripts:       make(map[string]script),
-		RbxEdits:      make(map[string]bool),
+		RbxEdits:      make(map[string]struct{}),
 		DirPath:       dirPath,
 		ScriptWatcher: watcher,
 	}
@@ -71,8 +71,8 @@ func openFile(path string, editor string) error {
 func main() {
 	ctx, err := newContext()
 
-	// Map of string in UUID / string form
-	changes := make(map[string]string)
+	// Map of string in UUID
+	changes := make(map[string]struct{})
 
 	if err != nil {
 		fmt.Printf("Unable to acquire context: %s\n", err)
@@ -95,7 +95,13 @@ func main() {
 				case event := <-ctx.ScriptWatcher.Events:
 					if event.Op&fsnotify.Write == fsnotify.Write {
 						uuid := strings.TrimSuffix(filepath.Base(event.Name), filepath.Ext(event.Name))
-						log.Printf("Edit to %s", uuid)
+						log.Printf("%s was edited", uuid)
+
+						if _, contains := ctx.RbxEdits[uuid]; !contains {
+							changes[uuid] = struct{}{}
+						} else {
+							delete(ctx.RbxEdits, uuid)
+						}
 					}
 				}
 			}
@@ -137,8 +143,26 @@ func main() {
 		})
 
 		http.HandleFunc("/changes", func(response http.ResponseWriter, request *http.Request) {
-			encoded, _ := json.Marshal(changes)
-			fmt.Printf(string(encoded))
+			realChanges := make(map[string]string)
+			sentChanges := []string{}
+
+			for uuid := range changes {
+				scr := ctx.Scripts[uuid]
+				body, err := ioutil.ReadFile(scr.FsPath)
+
+				if err != nil {
+					log.Printf("Couldn't read file: %s\n", err)
+				} else {
+					realChanges[uuid] = string(body)
+					sentChanges = append(sentChanges, uuid)
+				}
+			}
+
+			for _, sentUUID := range sentChanges {
+				delete(changes, sentUUID)
+			}
+
+			encoded, _ := json.Marshal(realChanges)
 			response.Write(encoded)
 		})
 
@@ -147,7 +171,7 @@ func main() {
 
 			if scr, ok := ctx.Scripts[uuid]; ok {
 				body := request.PostFormValue("body")
-				ctx.RbxEdits[uuid] = true
+				ctx.RbxEdits[uuid] = struct{}{}
 
 				err := ioutil.WriteFile(scr.FsPath, []byte(body), 0644)
 
