@@ -108,7 +108,7 @@ func main() {
 		}()
 
 		http.HandleFunc("/open", func(response http.ResponseWriter, request *http.Request) {
-			uuid := request.PostFormValue("uuid")
+			uuid, _ := url.QueryUnescape(request.PostFormValue("uuid"))
 			editorPath, _ := url.QueryUnescape(request.PostFormValue("editor"))
 
 			if scr, ok := ctx.Scripts[uuid]; ok {
@@ -167,10 +167,10 @@ func main() {
 		})
 
 		http.HandleFunc("/rbxedit", func(response http.ResponseWriter, request *http.Request) {
-			uuid := request.PostFormValue("uuid")
+			uuid, _ := url.QueryUnescape(request.PostFormValue("uuid"))
 
 			if scr, ok := ctx.Scripts[uuid]; ok {
-				body := request.PostFormValue("body")
+				body, _ := url.QueryEscape(request.PostFormValue("body"))
 				ctx.RbxEdits[uuid] = struct{}{}
 
 				err := ioutil.WriteFile(scr.FsPath, []byte(body), 0644)
