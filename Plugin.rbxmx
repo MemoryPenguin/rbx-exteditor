@@ -1,7 +1,7 @@
 <roblox xmlns:xmime="http://www.w3.org/2005/05/xmlmime" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://www.roblox.com/roblox.xsd" version="4">
 	<External>null</External>
 	<External>nil</External>
-	<Item class="Script" referent="RBX926FD56604284899BE40F182506737EB">
+	<Item class="Script" referent="RBXCD7DF7BCD0C442F5BA3F151BCBCD920E">
 		<Properties>
 			<bool name="Disabled">false</bool>
 			<Content name="LinkedSource"><null></null></Content>
@@ -25,6 +25,7 @@ local openButton = toolbar:CreateButton("Open Selection", "Opens selected script
 local resetButton = toolbar:CreateButton("Reset", "Resets the Studio agent, stopping further script replication. Use this if the plugin starts misbehaving." ,"")
 
 local openScripts = {}
+local connections = {}
 local justReplicated = {}
 local hasOpened = false
 
@@ -32,6 +33,13 @@ local function Reset()
 	print("External editor Studio agent is resetting (HTTP request failed). Open scripts will no longer be synced.")
 	openScripts = {}
 	justReplicated = {}
+	
+	for _, connection in ipairs(connections) do
+		connection:disconnect()
+	end
+	
+	connections = {}
+	
 	hasOpened = false
 end
 
@@ -46,7 +54,7 @@ local function OpenScript(targetScript)
 		print("Opened "..targetScript:GetFullName().." via the external edit agent.")
 		openScripts[uuid] = targetScript
 		
-		targetScript.Changed:connect(function(property)
+		table.insert(connections, targetScript.Changed:connect(function(property)
 			if property == "Source" then
 				if justReplicated[uuid] then
 					justReplicated[uuid] = false
@@ -54,7 +62,7 @@ local function OpenScript(targetScript)
 					NetworkBridge.PushLocalEdit(GuiController.GetPort(), uuid, targetScript.Source)
 				end
 			end
-		end)
+		end))
 		
 		hasOpened = true
 	end
@@ -114,7 +122,7 @@ while true do
 end]]></ProtectedString>
 		</Properties>
 	</Item>
-	<Item class="ModuleScript" referent="RBX6FF3F3D4F20D4688A749F9129DB0A79F">
+	<Item class="ModuleScript" referent="RBXAE195F94E9F8455595080846D02F71ED">
 		<Properties>
 			<Content name="LinkedSource"><null></null></Content>
 			<string name="Name">GuiController</string>
@@ -230,11 +238,11 @@ mainFrame.Position = HIDDEN_POSITION
 
 return GuiController]]></ProtectedString>
 		</Properties>
-		<Item class="ScreenGui" referent="RBX5B0F49363DD440A5BE9C6380D2741D53">
+		<Item class="ScreenGui" referent="RBX57C9A1EE8B0E48BA98AF4B09CF9F74F6">
 			<Properties>
 				<string name="Name">ExtEditorConfig</string>
 			</Properties>
-			<Item class="Frame" referent="RBX37A70B84C6D946A3A3FEE83665C4D79A">
+			<Item class="Frame" referent="RBXCA7DFAC1AA1F487FB2BAB6F182859796">
 				<Properties>
 					<bool name="Active">false</bool>
 					<Color3 name="BackgroundColor3">4282400832</Color3>
@@ -268,7 +276,7 @@ return GuiController]]></ProtectedString>
 					<bool name="Visible">true</bool>
 					<int name="ZIndex">1</int>
 				</Properties>
-				<Item class="TextLabel" referent="RBX2B6FD8B22F0F457DBC031206EFE1B742">
+				<Item class="TextLabel" referent="RBXECD45E7031ED4064ABFD23F9372230AD">
 					<Properties>
 						<bool name="Active">false</bool>
 						<Color3 name="BackgroundColor3">4294967295</Color3>
@@ -313,7 +321,7 @@ return GuiController]]></ProtectedString>
 						<int name="ZIndex">1</int>
 					</Properties>
 				</Item>
-				<Item class="TextButton" referent="RBX83AE90D8820A43BA8CB66050C33A0A86">
+				<Item class="TextButton" referent="RBX28AF57600D0F4DFD81681FD8A910EFA0">
 					<Properties>
 						<bool name="Active">true</bool>
 						<bool name="AutoButtonColor">true</bool>
@@ -361,7 +369,7 @@ return GuiController]]></ProtectedString>
 						<bool name="Visible">true</bool>
 						<int name="ZIndex">1</int>
 					</Properties>
-					<Item class="TextLabel" referent="RBX4A3E78FAA76046C1A2AE685C89D7BD11">
+					<Item class="TextLabel" referent="RBXDBE5FE45C0B648C6AE5CD82C9E2FFB3A">
 						<Properties>
 							<bool name="Active">false</bool>
 							<Color3 name="BackgroundColor3">4294967295</Color3>
@@ -407,7 +415,7 @@ return GuiController]]></ProtectedString>
 						</Properties>
 					</Item>
 				</Item>
-				<Item class="TextButton" referent="RBX45CE22C1B8FA41FEBA840A09A89EEF96">
+				<Item class="TextButton" referent="RBX35BD3F246CE44B7DA0754A24792E040D">
 					<Properties>
 						<bool name="Active">true</bool>
 						<bool name="AutoButtonColor">true</bool>
@@ -455,7 +463,7 @@ return GuiController]]></ProtectedString>
 						<bool name="Visible">true</bool>
 						<int name="ZIndex">1</int>
 					</Properties>
-					<Item class="TextLabel" referent="RBX925E40274A784FFC9D1D111142F7D9CE">
+					<Item class="TextLabel" referent="RBXBA1B022302DF4613A08ECFF01B13387E">
 						<Properties>
 							<bool name="Active">false</bool>
 							<Color3 name="BackgroundColor3">4294967295</Color3>
@@ -501,7 +509,7 @@ return GuiController]]></ProtectedString>
 						</Properties>
 					</Item>
 				</Item>
-				<Item class="Frame" referent="RBXB5549E4996CA42EAAFDFB27128C2E16D">
+				<Item class="Frame" referent="RBXC33F2F82A08748CA9456E92FF48F9F79">
 					<Properties>
 						<bool name="Active">false</bool>
 						<Color3 name="BackgroundColor3">4294967295</Color3>
@@ -535,7 +543,7 @@ return GuiController]]></ProtectedString>
 						<bool name="Visible">true</bool>
 						<int name="ZIndex">1</int>
 					</Properties>
-					<Item class="TextLabel" referent="RBXD332CA46788C4A8CB618A7810E1D9BBB">
+					<Item class="TextLabel" referent="RBX8494BED235D745128A7FC20B2D3C1DBD">
 						<Properties>
 							<bool name="Active">false</bool>
 							<Color3 name="BackgroundColor3">4294967295</Color3>
@@ -580,7 +588,7 @@ return GuiController]]></ProtectedString>
 							<int name="ZIndex">1</int>
 						</Properties>
 					</Item>
-					<Item class="TextBox" referent="RBX06A6943CD9ED4C46A5F3711AE23571FC">
+					<Item class="TextBox" referent="RBXB5F96BA91BE34E4A87D9B0528D1B35E1">
 						<Properties>
 							<bool name="Active">true</bool>
 							<Color3 name="BackgroundColor3">4294967295</Color3>
@@ -626,7 +634,7 @@ return GuiController]]></ProtectedString>
 							<bool name="Visible">true</bool>
 							<int name="ZIndex">1</int>
 						</Properties>
-						<Item class="Frame" referent="RBXE65310C204C44E6D872FD59653F482AC">
+						<Item class="Frame" referent="RBXAC4619F244054FDFA89B2B9FF55CF2E6">
 							<Properties>
 								<bool name="Active">false</bool>
 								<Color3 name="BackgroundColor3">4294967295</Color3>
@@ -663,7 +671,7 @@ return GuiController]]></ProtectedString>
 						</Item>
 					</Item>
 				</Item>
-				<Item class="Frame" referent="RBX39FAE4A7E4D14047BACAA920074CE7EB">
+				<Item class="Frame" referent="RBX8086B1C596834F448A306C9918768F6A">
 					<Properties>
 						<bool name="Active">false</bool>
 						<Color3 name="BackgroundColor3">4294967295</Color3>
@@ -697,7 +705,7 @@ return GuiController]]></ProtectedString>
 						<bool name="Visible">true</bool>
 						<int name="ZIndex">1</int>
 					</Properties>
-					<Item class="TextLabel" referent="RBX1177C58C6D0A49B490AD59AB8F879AAC">
+					<Item class="TextLabel" referent="RBXAF12FD29D2C54F609AE486EB34F35E1E">
 						<Properties>
 							<bool name="Active">false</bool>
 							<Color3 name="BackgroundColor3">4294967295</Color3>
@@ -742,7 +750,7 @@ return GuiController]]></ProtectedString>
 							<int name="ZIndex">1</int>
 						</Properties>
 					</Item>
-					<Item class="TextBox" referent="RBX78D11FD7961D4B46A2440FB71CA4BBE3">
+					<Item class="TextBox" referent="RBXFCB19EF2370843C6AD899D98DF025775">
 						<Properties>
 							<bool name="Active">true</bool>
 							<Color3 name="BackgroundColor3">4294967295</Color3>
@@ -788,7 +796,7 @@ return GuiController]]></ProtectedString>
 							<bool name="Visible">true</bool>
 							<int name="ZIndex">1</int>
 						</Properties>
-						<Item class="Frame" referent="RBX4001B09FA64A4F61BCF7545B7CDDF4FB">
+						<Item class="Frame" referent="RBXAC4EC3AEA222404FBA051563326EB772">
 							<Properties>
 								<bool name="Active">false</bool>
 								<Color3 name="BackgroundColor3">4294967295</Color3>
@@ -825,7 +833,7 @@ return GuiController]]></ProtectedString>
 						</Item>
 					</Item>
 				</Item>
-				<Item class="TextLabel" referent="RBX9AE0028EE24241F98410D6EAB1109C39">
+				<Item class="TextLabel" referent="RBXD23EAD931FAF471792C1B4908C9FF2C5">
 					<Properties>
 						<bool name="Active">false</bool>
 						<Color3 name="BackgroundColor3">4294967295</Color3>
@@ -870,7 +878,7 @@ return GuiController]]></ProtectedString>
 						<int name="ZIndex">1</int>
 					</Properties>
 				</Item>
-				<Item class="Frame" referent="RBX5F750F25796146B4AB67271202CA1C79">
+				<Item class="Frame" referent="RBX8E10C9B9D7A3400E879A198B7054F46B">
 					<Properties>
 						<bool name="Active">false</bool>
 						<Color3 name="BackgroundColor3">4294967295</Color3>
@@ -908,7 +916,7 @@ return GuiController]]></ProtectedString>
 			</Item>
 		</Item>
 	</Item>
-	<Item class="ModuleScript" referent="RBX6111DD1C7E694A349B13303731569B9C">
+	<Item class="ModuleScript" referent="RBX8EA959A094DA4ACDA1F146402454D041">
 		<Properties>
 			<Content name="LinkedSource"><null></null></Content>
 			<string name="Name">NetworkBridge</string>
