@@ -6,7 +6,6 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
-	"net/url"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -108,8 +107,8 @@ func main() {
 		}()
 
 		http.HandleFunc("/open", func(response http.ResponseWriter, request *http.Request) {
-			uuid, _ := url.QueryUnescape(request.PostFormValue("uuid"))
-			editorPath, _ := url.QueryUnescape(request.PostFormValue("editor"))
+			uuid := request.PostFormValue("uuid")
+			editorPath := request.PostFormValue("editor")
 
 			if scr, ok := ctx.Scripts[uuid]; ok {
 				log.Printf("Reopening UUID %s at FS path %s\n", uuid, scr.FsPath)
@@ -117,7 +116,7 @@ func main() {
 
 				openFile(scr.FsPath, editorPath)
 			} else {
-				body, _ := url.QueryUnescape(request.PostFormValue("body"))
+				body := request.PostFormValue("body")
 				scriptPath := path.Join(ctx.DirPath, uuid+".rbxs")
 
 				err := ioutil.WriteFile(scriptPath, []byte(body), 0644)
@@ -167,10 +166,10 @@ func main() {
 		})
 
 		http.HandleFunc("/rbxedit", func(response http.ResponseWriter, request *http.Request) {
-			uuid, _ := url.QueryUnescape(request.PostFormValue("uuid"))
+			uuid := request.PostFormValue("uuid")
 
 			if scr, ok := ctx.Scripts[uuid]; ok {
-				body, _ := url.QueryUnescape(request.PostFormValue("body"))
+				body := request.PostFormValue("body")
 				ctx.RbxEdits[uuid] = struct{}{}
 
 				err := ioutil.WriteFile(scr.FsPath, []byte(body), 0644)
