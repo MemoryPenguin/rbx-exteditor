@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"log"
@@ -58,6 +59,9 @@ func handler(response http.ResponseWriter, request *http.Request) {
 func main() {
 	ctx, err := newContext()
 
+	// Map of string in UUID / string form
+	changes := make(map[string]string)
+
 	if err != nil {
 		fmt.Printf("Unable to acquire context: %s\n", err)
 	} else {
@@ -101,7 +105,9 @@ func main() {
 		})
 
 		http.HandleFunc("/changes", func(response http.ResponseWriter, request *http.Request) {
-
+			encoded, _ := json.Marshal(changes)
+			fmt.Printf(string(encoded))
+			response.Write(encoded)
 		})
 
 		http.HandleFunc("/rbxedit", func(response http.ResponseWriter, request *http.Request) {
