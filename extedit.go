@@ -69,6 +69,20 @@ func main() {
 
 		fmt.Printf("External edit agent has acquired context. Temporary files will be stored in %s.\n", ctx.DirPath)
 
+		go func() {
+			for {
+				select {
+				case event := <-ctx.ScriptWatcher.Events:
+					if event.Op&fsnotify.Write == fsnotify.Write {
+						log.Printf("Edit to %s\n", event.Name)
+
+						uuid := path.Base(event.Name)
+						log.Printf("Edit to %s", uuid)
+					}
+				}
+			}
+		}()
+
 		http.HandleFunc("/open", func(response http.ResponseWriter, request *http.Request) {
 			uuid := request.PostFormValue("uuid")
 
