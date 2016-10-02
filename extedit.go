@@ -57,8 +57,15 @@ func destroyContext(ctx *context) {
 	os.RemoveAll(ctx.DirPath)
 }
 
-func handler(response http.ResponseWriter, request *http.Request) {
-	fmt.Fprintf(response, "Hi %s", request.URL.Path)
+func openFile(path string, editor string) error {
+	cmd := exec.Command(editor, path)
+	err := cmd.Start()
+
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func main() {
@@ -96,9 +103,13 @@ func main() {
 
 		http.HandleFunc("/open", func(response http.ResponseWriter, request *http.Request) {
 			uuid := request.PostFormValue("uuid")
+			editorPath, _ := url.QueryUnescape(request.PostFormValue("editor"))
 
-			if _, ok := ctx.Scripts[uuid]; ok {
-				fmt.Fprint(response, "failure: already registered\n")
+			if scr, ok := ctx.Scripts[uuid]; ok {
+				log.Printf("Reopening UUID %s at FS path %s\n", uuid, scr.FsPath)
+				fmt.Fprintf(response, "success: reopen")
+
+				openFile(scr.FsPath, editorPath)
 			} else {
 				body, _ := url.QueryUnescape(request.PostFormValue("body"))
 				scriptPath := path.Join(ctx.DirPath, uuid+".rbxs")
@@ -117,16 +128,10 @@ func main() {
 					ctx.Scripts[uuid] = scr
 					ctx.ScriptWatcher.Add(scriptPath)
 
-					editorPath, _ := url.QueryUnescape(request.PostFormValue("editor"))
-
-					cmd := exec.Command(editorPath, scriptPath)
-					err := cmd.Start()
-
-					if err != nil {
-						log.Fatal(err)
-					}
+					openFile(scriptPath, editorPath)
 
 					fmt.Printf("Opened UUID %s at FS path %s\n", uuid, scriptPath)
+					fmt.Fprintf(response, "success: new")
 				}
 			}
 		})
