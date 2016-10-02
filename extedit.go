@@ -9,9 +9,11 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	"github.com/fsnotify/fsnotify"
 )
@@ -69,6 +71,14 @@ func main() {
 		fmt.Printf("Unable to acquire context: %s\n", err)
 	} else {
 		defer destroyContext(ctx)
+
+		interruptChannel := make(chan os.Signal)
+		signal.Notify(interruptChannel, os.Interrupt, syscall.SIGTERM)
+		go func() {
+			<-interruptChannel
+			destroyContext(ctx)
+			os.Exit(0)
+		}()
 
 		fmt.Printf("External edit agent has acquired context. Temporary files will be stored in %s.\n", ctx.DirPath)
 
