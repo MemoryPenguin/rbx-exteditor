@@ -1,0 +1,1072 @@
+<roblox xmlns:xmime="http://www.w3.org/2005/05/xmlmime" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://www.roblox.com/roblox.xsd" version="4">
+	<External>null</External>
+	<External>nil</External>
+	<Item class="Script" referent="RBX926FD56604284899BE40F182506737EB">
+		<Properties>
+			<bool name="Disabled">false</bool>
+			<Content name="LinkedSource"><null></null></Content>
+			<string name="Name">ExtEditor</string>
+			<string name="ScriptGuid"></string>
+			<ProtectedString name="Source"><![CDATA[-- Squelch Script Analysis warnings
+plugin = plugin
+
+local DEFAULT_PORT = 8080
+local DEFAULT_EDITOR = ""
+
+local GuiController = require(plugin.GuiController)
+local NetworkBridge = require(plugin.NetworkBridge)
+
+local HttpService = game:GetService("HttpService")
+local Selection = game:GetService("Selection")
+
+local toolbar = plugin:CreateToolbar("External Editor")
+local configButton = toolbar:CreateButton("Configure", "Allows you to configure the external editor.", "")
+local openButton = toolbar:CreateButton("Open Selection", "Opens selected scripts in the external editor you have configured.", "")
+local resetButton = toolbar:CreateButton("Reset", "Resets the Studio agent, stopping further script replication. Use this if the plugin starts misbehaving." ,"")
+
+local openScripts = {}
+local justReplicated = {}
+local hasOpened = false
+
+local function Reset()
+	print("External editor Studio agent is resetting (HTTP request failed). Open scripts will no longer be synced.")
+	openScripts = {}
+	justReplicated = {}
+	hasOpened = false
+end
+
+local function OpenScript(targetScript)
+	local uuid = HttpService:GenerateGUID(false)
+	
+	local success, message = NetworkBridge.OpenScript(GuiController.GetPort(), uuid, targetScript.Source, GuiController.GetEditor())
+	if not success then
+		warn("Unable to open "..targetScript:GetFullName()..": "..message)
+		Reset()
+	else
+		print("Opened "..targetScript:GetFullName().." via the external edit agent.")
+		openScripts[uuid] = targetScript
+		
+		targetScript.Changed:connect(function(property)
+			if property == "Source" then
+				if justReplicated[uuid] then
+					justReplicated[uuid] = false
+				else
+					NetworkBridge.PushLocalEdit(GuiController.GetPort(), uuid, targetScript.Source)
+				end
+			end
+		end)
+		
+		hasOpened = true
+	end
+end
+
+local function Step()
+	local success, jsonChanges = NetworkBridge.GetChanges(GuiController.GetPort())
+	
+	if not success then
+		warn("Unable to retrieve changes: "..jsonChanges)
+		Reset()
+	else
+		local changes = HttpService:JSONDecode(jsonChanges)
+		
+		for uuid, body in pairs(changes) do
+			local object = openScripts[uuid]
+			
+			if object ~= nil then
+				justReplicated[uuid] = true
+				object.Source = body
+				print("Replicating external changes to "..object:GetFullName())
+			end
+		end
+	end
+end
+
+configButton.Click:connect(function()
+	GuiController.SetVisible(not GuiController.IsVisible())
+end)
+
+openButton.Click:connect(function()
+	for _, object in ipairs(Selection:Get()) do
+		if object:IsA("LuaSourceContainer") then
+			OpenScript(object)
+		end
+	end
+end)
+
+resetButton.Click:connect(Reset)
+
+GuiController.VisibilityChange:connect(function(newVisible)
+	configButton:SetActive(newVisible)
+end)
+
+GuiController.LoadValues(plugin:GetSetting("ExtEditPort") or DEFAULT_PORT, plugin:GetSetting("ExtEditEditor") or DEFAULT_EDITOR)
+
+GuiController.ValueChange:connect(function(newPort, newEditor)
+	plugin:SetSetting("ExtEditPort", newPort)
+	plugin:SetSetting("ExtEditEditor", newEditor)
+end)
+
+while true do
+	wait(1)
+	if hasOpened then
+		Step()
+	end
+end]]></ProtectedString>
+		</Properties>
+	</Item>
+	<Item class="ModuleScript" referent="RBX6FF3F3D4F20D4688A749F9129DB0A79F">
+		<Properties>
+			<Content name="LinkedSource"><null></null></Content>
+			<string name="Name">GuiController</string>
+			<string name="ScriptGuid"></string>
+			<ProtectedString name="Source"><![CDATA[local UNSAVED_CHANGES_WARNING = "You have unsaved changes."
+local PORT_INVALID_WARNING = "Port must be a number between 1 and 65535."
+
+local VISIBLE_POSITION = UDim2.new(0.3, 0, 0.7, -10)
+local HIDDEN_POSITION = UDim2.new(0.3, 0, 1, 10)
+
+local ACTIVE_COLOR = Color3.fromRGB(75, 138, 255)
+local INACTIVE_COLOR = Color3.fromRGB(120, 136, 154)
+
+local CoreGui = game:GetService("CoreGui")
+
+local gui = script.ExtEditorConfig
+local mainFrame = gui.Main
+local closeButton = mainFrame.CloseButton
+local saveButton = mainFrame.SaveButton
+local editorBox = mainFrame.EditorInput.Box
+local portBox = mainFrame.PortInput.Box
+local warningText = mainFrame.Warning
+
+local visible = false
+local fieldsDirty = false
+local port = 8080
+local editor = ""
+
+local visibilityEvent = Instance.new("BindableEvent")
+local valueChangeEvent = Instance.new("BindableEvent")
+
+local function UpdateWarnings()
+	local value = tonumber(portBox.Text)
+	
+	if value == nil or value < 1 or value > 65535 then
+		warningText.Text = PORT_INVALID_WARNING
+		saveButton.BackgroundColor3 = INACTIVE_COLOR
+		saveButton.AutoButtonColor = false
+		saveButton.Active = false
+	else
+		fieldsDirty = true
+		warningText.Text = UNSAVED_CHANGES_WARNING
+		saveButton.BackgroundColor3 = ACTIVE_COLOR
+		saveButton.AutoButtonColor = true
+		saveButton.Active = true
+	end
+end
+
+local GuiController = {}
+
+function GuiController.LoadValues(savedPort, savedEditor)
+	port = savedPort
+	portBox.Text = savedPort	
+	
+	editor = savedEditor
+	editorBox.Text = savedEditor
+	-- Allow changed events to run before undoing their warning text work.
+	coroutine.yield()
+	fieldsDirty = false
+	warningText.Text = ""
+end
+
+function GuiController.SetVisible(newVisible)
+	local pos = newVisible and VISIBLE_POSITION or HIDDEN_POSITION
+	mainFrame:TweenPosition(
+		pos,
+		newVisible and Enum.EasingDirection.Out or Enum.EasingDirection.In,
+		Enum.EasingStyle.Back,
+		0.325,
+		true
+	)
+	
+	visible = newVisible
+	visibilityEvent:Fire(newVisible)
+	portBox.Text = port
+	editorBox.Text = editor
+end
+
+function GuiController.IsVisible()
+	return visible
+end
+
+function GuiController.GetPort()
+	return port
+end
+
+function GuiController.GetEditor()
+	return editor
+end
+
+GuiController.VisibilityChange = visibilityEvent.Event
+GuiController.ValueChange = valueChangeEvent.Event
+
+portBox.Changed:connect(UpdateWarnings)
+editorBox.Changed:connect(UpdateWarnings)
+
+closeButton.MouseButton1Click:connect(function()
+	GuiController.SetVisible(false)
+end)
+
+saveButton.MouseButton1Click:connect(function()
+	if fieldsDirty then
+		port = tonumber(portBox.Text)
+		editor = editorBox.Text
+		valueChangeEvent:Fire(port, editor)
+		warningText.Text = ""
+	end
+end)
+
+gui.Parent = CoreGui
+visible = false
+mainFrame.Position = HIDDEN_POSITION
+
+return GuiController]]></ProtectedString>
+		</Properties>
+		<Item class="ScreenGui" referent="RBX5B0F49363DD440A5BE9C6380D2741D53">
+			<Properties>
+				<string name="Name">ExtEditorConfig</string>
+			</Properties>
+			<Item class="Frame" referent="RBX37A70B84C6D946A3A3FEE83665C4D79A">
+				<Properties>
+					<bool name="Active">false</bool>
+					<Color3 name="BackgroundColor3">4282400832</Color3>
+					<float name="BackgroundTransparency">0</float>
+					<Color3 name="BorderColor3">4289703855</Color3>
+					<int name="BorderSizePixel">1</int>
+					<bool name="ClipsDescendants">false</bool>
+					<bool name="Draggable">false</bool>
+					<string name="Name">Main</string>
+					<Ref name="NextSelectionDown">null</Ref>
+					<Ref name="NextSelectionLeft">null</Ref>
+					<Ref name="NextSelectionRight">null</Ref>
+					<Ref name="NextSelectionUp">null</Ref>
+					<UDim2 name="Position">
+						<XS>0.300000012</XS>
+						<XO>0</XO>
+						<YS>0.699999988</YS>
+						<YO>-10</YO>
+					</UDim2>
+					<float name="Rotation">0</float>
+					<bool name="Selectable">false</bool>
+					<Ref name="SelectionImageObject">null</Ref>
+					<UDim2 name="Size">
+						<XS>0.400000006</XS>
+						<XO>0</XO>
+						<YS>0.300000012</YS>
+						<YO>0</YO>
+					</UDim2>
+					<token name="SizeConstraint">0</token>
+					<token name="Style">0</token>
+					<bool name="Visible">true</bool>
+					<int name="ZIndex">1</int>
+				</Properties>
+				<Item class="TextLabel" referent="RBX2B6FD8B22F0F457DBC031206EFE1B742">
+					<Properties>
+						<bool name="Active">false</bool>
+						<Color3 name="BackgroundColor3">4294967295</Color3>
+						<float name="BackgroundTransparency">1</float>
+						<Color3 name="BorderColor3">4279970357</Color3>
+						<int name="BorderSizePixel">0</int>
+						<bool name="ClipsDescendants">false</bool>
+						<bool name="Draggable">false</bool>
+						<token name="Font">3</token>
+						<token name="FontSize">5</token>
+						<string name="Name">Title</string>
+						<Ref name="NextSelectionDown">null</Ref>
+						<Ref name="NextSelectionLeft">null</Ref>
+						<Ref name="NextSelectionRight">null</Ref>
+						<Ref name="NextSelectionUp">null</Ref>
+						<UDim2 name="Position">
+							<XS>0</XS>
+							<XO>0</XO>
+							<YS>0.0250000004</YS>
+							<YO>0</YO>
+						</UDim2>
+						<float name="Rotation">0</float>
+						<bool name="Selectable">false</bool>
+						<Ref name="SelectionImageObject">null</Ref>
+						<UDim2 name="Size">
+							<XS>1</XS>
+							<XO>0</XO>
+							<YS>0.150000006</YS>
+							<YO>0</YO>
+						</UDim2>
+						<token name="SizeConstraint">0</token>
+						<string name="Text">External Editor</string>
+						<Color3 name="TextColor3">4293980400</Color3>
+						<bool name="TextScaled">true</bool>
+						<Color3 name="TextStrokeColor3">4278190080</Color3>
+						<float name="TextStrokeTransparency">1</float>
+						<float name="TextTransparency">0</float>
+						<bool name="TextWrapped">true</bool>
+						<token name="TextXAlignment">2</token>
+						<token name="TextYAlignment">1</token>
+						<bool name="Visible">true</bool>
+						<int name="ZIndex">1</int>
+					</Properties>
+				</Item>
+				<Item class="TextButton" referent="RBX83AE90D8820A43BA8CB66050C33A0A86">
+					<Properties>
+						<bool name="Active">true</bool>
+						<bool name="AutoButtonColor">true</bool>
+						<Color3 name="BackgroundColor3">4283140863</Color3>
+						<float name="BackgroundTransparency">0</float>
+						<Color3 name="BorderColor3">4279970357</Color3>
+						<int name="BorderSizePixel">0</int>
+						<bool name="ClipsDescendants">false</bool>
+						<bool name="Draggable">false</bool>
+						<token name="Font">3</token>
+						<token name="FontSize">5</token>
+						<bool name="Modal">false</bool>
+						<string name="Name">SaveButton</string>
+						<Ref name="NextSelectionDown">null</Ref>
+						<Ref name="NextSelectionLeft">null</Ref>
+						<Ref name="NextSelectionRight">null</Ref>
+						<Ref name="NextSelectionUp">null</Ref>
+						<UDim2 name="Position">
+							<XS>0.699999988</XS>
+							<XO>0</XO>
+							<YS>0.75</YS>
+							<YO>0</YO>
+						</UDim2>
+						<float name="Rotation">0</float>
+						<bool name="Selectable">true</bool>
+						<bool name="Selected">false</bool>
+						<Ref name="SelectionImageObject">null</Ref>
+						<UDim2 name="Size">
+							<XS>0.25</XS>
+							<XO>0</XO>
+							<YS>0.200000003</YS>
+							<YO>0</YO>
+						</UDim2>
+						<token name="SizeConstraint">0</token>
+						<token name="Style">0</token>
+						<string name="Text"></string>
+						<Color3 name="TextColor3">4279970357</Color3>
+						<bool name="TextScaled">false</bool>
+						<Color3 name="TextStrokeColor3">4278190080</Color3>
+						<float name="TextStrokeTransparency">1</float>
+						<float name="TextTransparency">0</float>
+						<bool name="TextWrapped">false</bool>
+						<token name="TextXAlignment">2</token>
+						<token name="TextYAlignment">1</token>
+						<bool name="Visible">true</bool>
+						<int name="ZIndex">1</int>
+					</Properties>
+					<Item class="TextLabel" referent="RBX4A3E78FAA76046C1A2AE685C89D7BD11">
+						<Properties>
+							<bool name="Active">false</bool>
+							<Color3 name="BackgroundColor3">4294967295</Color3>
+							<float name="BackgroundTransparency">1</float>
+							<Color3 name="BorderColor3">4279970357</Color3>
+							<int name="BorderSizePixel">1</int>
+							<bool name="ClipsDescendants">false</bool>
+							<bool name="Draggable">false</bool>
+							<token name="Font">3</token>
+							<token name="FontSize">5</token>
+							<string name="Name">TextLabel</string>
+							<Ref name="NextSelectionDown">null</Ref>
+							<Ref name="NextSelectionLeft">null</Ref>
+							<Ref name="NextSelectionRight">null</Ref>
+							<Ref name="NextSelectionUp">null</Ref>
+							<UDim2 name="Position">
+								<XS>0</XS>
+								<XO>0</XO>
+								<YS>0.150000006</YS>
+								<YO>0</YO>
+							</UDim2>
+							<float name="Rotation">0</float>
+							<bool name="Selectable">false</bool>
+							<Ref name="SelectionImageObject">null</Ref>
+							<UDim2 name="Size">
+								<XS>1</XS>
+								<XO>0</XO>
+								<YS>0.699999988</YS>
+								<YO>0</YO>
+							</UDim2>
+							<token name="SizeConstraint">0</token>
+							<string name="Text">Save</string>
+							<Color3 name="TextColor3">4293980400</Color3>
+							<bool name="TextScaled">true</bool>
+							<Color3 name="TextStrokeColor3">4278190080</Color3>
+							<float name="TextStrokeTransparency">1</float>
+							<float name="TextTransparency">0</float>
+							<bool name="TextWrapped">true</bool>
+							<token name="TextXAlignment">2</token>
+							<token name="TextYAlignment">1</token>
+							<bool name="Visible">true</bool>
+							<int name="ZIndex">1</int>
+						</Properties>
+					</Item>
+				</Item>
+				<Item class="TextButton" referent="RBX45CE22C1B8FA41FEBA840A09A89EEF96">
+					<Properties>
+						<bool name="Active">true</bool>
+						<bool name="AutoButtonColor">true</bool>
+						<Color3 name="BackgroundColor3">4291510079</Color3>
+						<float name="BackgroundTransparency">0</float>
+						<Color3 name="BorderColor3">4279970357</Color3>
+						<int name="BorderSizePixel">0</int>
+						<bool name="ClipsDescendants">false</bool>
+						<bool name="Draggable">false</bool>
+						<token name="Font">3</token>
+						<token name="FontSize">5</token>
+						<bool name="Modal">false</bool>
+						<string name="Name">CloseButton</string>
+						<Ref name="NextSelectionDown">null</Ref>
+						<Ref name="NextSelectionLeft">null</Ref>
+						<Ref name="NextSelectionRight">null</Ref>
+						<Ref name="NextSelectionUp">null</Ref>
+						<UDim2 name="Position">
+							<XS>0.949999988</XS>
+							<XO>0</XO>
+							<YS>0</YS>
+							<YO>0</YO>
+						</UDim2>
+						<float name="Rotation">0</float>
+						<bool name="Selectable">true</bool>
+						<bool name="Selected">false</bool>
+						<Ref name="SelectionImageObject">null</Ref>
+						<UDim2 name="Size">
+							<XS>0.0500000007</XS>
+							<XO>0</XO>
+							<YS>0.0500000007</YS>
+							<YO>0</YO>
+						</UDim2>
+						<token name="SizeConstraint">1</token>
+						<token name="Style">0</token>
+						<string name="Text"></string>
+						<Color3 name="TextColor3">4279970357</Color3>
+						<bool name="TextScaled">false</bool>
+						<Color3 name="TextStrokeColor3">4278190080</Color3>
+						<float name="TextStrokeTransparency">1</float>
+						<float name="TextTransparency">0</float>
+						<bool name="TextWrapped">false</bool>
+						<token name="TextXAlignment">2</token>
+						<token name="TextYAlignment">1</token>
+						<bool name="Visible">true</bool>
+						<int name="ZIndex">1</int>
+					</Properties>
+					<Item class="TextLabel" referent="RBX925E40274A784FFC9D1D111142F7D9CE">
+						<Properties>
+							<bool name="Active">false</bool>
+							<Color3 name="BackgroundColor3">4294967295</Color3>
+							<float name="BackgroundTransparency">1</float>
+							<Color3 name="BorderColor3">4279970357</Color3>
+							<int name="BorderSizePixel">1</int>
+							<bool name="ClipsDescendants">false</bool>
+							<bool name="Draggable">false</bool>
+							<token name="Font">4</token>
+							<token name="FontSize">5</token>
+							<string name="Name">TextLabel</string>
+							<Ref name="NextSelectionDown">null</Ref>
+							<Ref name="NextSelectionLeft">null</Ref>
+							<Ref name="NextSelectionRight">null</Ref>
+							<Ref name="NextSelectionUp">null</Ref>
+							<UDim2 name="Position">
+								<XS>0</XS>
+								<XO>0</XO>
+								<YS>0.150000006</YS>
+								<YO>0</YO>
+							</UDim2>
+							<float name="Rotation">0</float>
+							<bool name="Selectable">false</bool>
+							<Ref name="SelectionImageObject">null</Ref>
+							<UDim2 name="Size">
+								<XS>1</XS>
+								<XO>0</XO>
+								<YS>0.699999988</YS>
+								<YO>0</YO>
+							</UDim2>
+							<token name="SizeConstraint">0</token>
+							<string name="Text">X</string>
+							<Color3 name="TextColor3">4293980400</Color3>
+							<bool name="TextScaled">true</bool>
+							<Color3 name="TextStrokeColor3">4278190080</Color3>
+							<float name="TextStrokeTransparency">1</float>
+							<float name="TextTransparency">0</float>
+							<bool name="TextWrapped">true</bool>
+							<token name="TextXAlignment">2</token>
+							<token name="TextYAlignment">1</token>
+							<bool name="Visible">true</bool>
+							<int name="ZIndex">1</int>
+						</Properties>
+					</Item>
+				</Item>
+				<Item class="Frame" referent="RBXB5549E4996CA42EAAFDFB27128C2E16D">
+					<Properties>
+						<bool name="Active">false</bool>
+						<Color3 name="BackgroundColor3">4294967295</Color3>
+						<float name="BackgroundTransparency">1</float>
+						<Color3 name="BorderColor3">4279970357</Color3>
+						<int name="BorderSizePixel">0</int>
+						<bool name="ClipsDescendants">false</bool>
+						<bool name="Draggable">false</bool>
+						<string name="Name">PortInput</string>
+						<Ref name="NextSelectionDown">null</Ref>
+						<Ref name="NextSelectionLeft">null</Ref>
+						<Ref name="NextSelectionRight">null</Ref>
+						<Ref name="NextSelectionUp">null</Ref>
+						<UDim2 name="Position">
+							<XS>0</XS>
+							<XO>0</XO>
+							<YS>0.200000003</YS>
+							<YO>0</YO>
+						</UDim2>
+						<float name="Rotation">0</float>
+						<bool name="Selectable">false</bool>
+						<Ref name="SelectionImageObject">null</Ref>
+						<UDim2 name="Size">
+							<XS>1</XS>
+							<XO>0</XO>
+							<YS>0.25</YS>
+							<YO>0</YO>
+						</UDim2>
+						<token name="SizeConstraint">0</token>
+						<token name="Style">0</token>
+						<bool name="Visible">true</bool>
+						<int name="ZIndex">1</int>
+					</Properties>
+					<Item class="TextLabel" referent="RBXD332CA46788C4A8CB618A7810E1D9BBB">
+						<Properties>
+							<bool name="Active">false</bool>
+							<Color3 name="BackgroundColor3">4294967295</Color3>
+							<float name="BackgroundTransparency">1</float>
+							<Color3 name="BorderColor3">4279970357</Color3>
+							<int name="BorderSizePixel">1</int>
+							<bool name="ClipsDescendants">false</bool>
+							<bool name="Draggable">false</bool>
+							<token name="Font">3</token>
+							<token name="FontSize">5</token>
+							<string name="Name">Hint</string>
+							<Ref name="NextSelectionDown">null</Ref>
+							<Ref name="NextSelectionLeft">null</Ref>
+							<Ref name="NextSelectionRight">null</Ref>
+							<Ref name="NextSelectionUp">null</Ref>
+							<UDim2 name="Position">
+								<XS>0</XS>
+								<XO>0</XO>
+								<YS>0.25</YS>
+								<YO>0</YO>
+							</UDim2>
+							<float name="Rotation">0</float>
+							<bool name="Selectable">false</bool>
+							<Ref name="SelectionImageObject">null</Ref>
+							<UDim2 name="Size">
+								<XS>0.224999994</XS>
+								<XO>0</XO>
+								<YS>0.5</YS>
+								<YO>0</YO>
+							</UDim2>
+							<token name="SizeConstraint">0</token>
+							<string name="Text">Port</string>
+							<Color3 name="TextColor3">4293980400</Color3>
+							<bool name="TextScaled">true</bool>
+							<Color3 name="TextStrokeColor3">4278190080</Color3>
+							<float name="TextStrokeTransparency">1</float>
+							<float name="TextTransparency">0</float>
+							<bool name="TextWrapped">true</bool>
+							<token name="TextXAlignment">1</token>
+							<token name="TextYAlignment">1</token>
+							<bool name="Visible">true</bool>
+							<int name="ZIndex">1</int>
+						</Properties>
+					</Item>
+					<Item class="TextBox" referent="RBX06A6943CD9ED4C46A5F3711AE23571FC">
+						<Properties>
+							<bool name="Active">true</bool>
+							<Color3 name="BackgroundColor3">4294967295</Color3>
+							<float name="BackgroundTransparency">1</float>
+							<Color3 name="BorderColor3">4279970357</Color3>
+							<int name="BorderSizePixel">1</int>
+							<bool name="ClearTextOnFocus">true</bool>
+							<bool name="ClipsDescendants">false</bool>
+							<bool name="Draggable">false</bool>
+							<token name="Font">3</token>
+							<token name="FontSize">5</token>
+							<bool name="MultiLine">false</bool>
+							<string name="Name">Box</string>
+							<Ref name="NextSelectionDown">null</Ref>
+							<Ref name="NextSelectionLeft">null</Ref>
+							<Ref name="NextSelectionRight">null</Ref>
+							<Ref name="NextSelectionUp">null</Ref>
+							<UDim2 name="Position">
+								<XS>0.25</XS>
+								<XO>0</XO>
+								<YS>0.25</YS>
+								<YO>0</YO>
+							</UDim2>
+							<float name="Rotation">0</float>
+							<bool name="Selectable">true</bool>
+							<Ref name="SelectionImageObject">null</Ref>
+							<UDim2 name="Size">
+								<XS>0.725000024</XS>
+								<XO>0</XO>
+								<YS>0.5</YS>
+								<YO>0</YO>
+							</UDim2>
+							<token name="SizeConstraint">0</token>
+							<string name="Text">8080</string>
+							<Color3 name="TextColor3">4293980400</Color3>
+							<bool name="TextScaled">true</bool>
+							<Color3 name="TextStrokeColor3">4278190080</Color3>
+							<float name="TextStrokeTransparency">1</float>
+							<float name="TextTransparency">0</float>
+							<bool name="TextWrapped">true</bool>
+							<token name="TextXAlignment">0</token>
+							<token name="TextYAlignment">1</token>
+							<bool name="Visible">true</bool>
+							<int name="ZIndex">1</int>
+						</Properties>
+						<Item class="Frame" referent="RBXE65310C204C44E6D872FD59653F482AC">
+							<Properties>
+								<bool name="Active">false</bool>
+								<Color3 name="BackgroundColor3">4294967295</Color3>
+								<float name="BackgroundTransparency">0.800000012</float>
+								<Color3 name="BorderColor3">4279970357</Color3>
+								<int name="BorderSizePixel">0</int>
+								<bool name="ClipsDescendants">false</bool>
+								<bool name="Draggable">false</bool>
+								<string name="Name">Line</string>
+								<Ref name="NextSelectionDown">null</Ref>
+								<Ref name="NextSelectionLeft">null</Ref>
+								<Ref name="NextSelectionRight">null</Ref>
+								<Ref name="NextSelectionUp">null</Ref>
+								<UDim2 name="Position">
+									<XS>0</XS>
+									<XO>0</XO>
+									<YS>1</YS>
+									<YO>0</YO>
+								</UDim2>
+								<float name="Rotation">0</float>
+								<bool name="Selectable">false</bool>
+								<Ref name="SelectionImageObject">null</Ref>
+								<UDim2 name="Size">
+									<XS>1</XS>
+									<XO>0</XO>
+									<YS>0</YS>
+									<YO>1</YO>
+								</UDim2>
+								<token name="SizeConstraint">0</token>
+								<token name="Style">0</token>
+								<bool name="Visible">true</bool>
+								<int name="ZIndex">1</int>
+							</Properties>
+						</Item>
+					</Item>
+				</Item>
+				<Item class="Frame" referent="RBX39FAE4A7E4D14047BACAA920074CE7EB">
+					<Properties>
+						<bool name="Active">false</bool>
+						<Color3 name="BackgroundColor3">4294967295</Color3>
+						<float name="BackgroundTransparency">1</float>
+						<Color3 name="BorderColor3">4279970357</Color3>
+						<int name="BorderSizePixel">0</int>
+						<bool name="ClipsDescendants">false</bool>
+						<bool name="Draggable">false</bool>
+						<string name="Name">EditorInput</string>
+						<Ref name="NextSelectionDown">null</Ref>
+						<Ref name="NextSelectionLeft">null</Ref>
+						<Ref name="NextSelectionRight">null</Ref>
+						<Ref name="NextSelectionUp">null</Ref>
+						<UDim2 name="Position">
+							<XS>0</XS>
+							<XO>0</XO>
+							<YS>0.449999988</YS>
+							<YO>0</YO>
+						</UDim2>
+						<float name="Rotation">0</float>
+						<bool name="Selectable">false</bool>
+						<Ref name="SelectionImageObject">null</Ref>
+						<UDim2 name="Size">
+							<XS>1</XS>
+							<XO>0</XO>
+							<YS>0.25</YS>
+							<YO>0</YO>
+						</UDim2>
+						<token name="SizeConstraint">0</token>
+						<token name="Style">0</token>
+						<bool name="Visible">true</bool>
+						<int name="ZIndex">1</int>
+					</Properties>
+					<Item class="TextLabel" referent="RBX1177C58C6D0A49B490AD59AB8F879AAC">
+						<Properties>
+							<bool name="Active">false</bool>
+							<Color3 name="BackgroundColor3">4294967295</Color3>
+							<float name="BackgroundTransparency">1</float>
+							<Color3 name="BorderColor3">4279970357</Color3>
+							<int name="BorderSizePixel">1</int>
+							<bool name="ClipsDescendants">false</bool>
+							<bool name="Draggable">false</bool>
+							<token name="Font">3</token>
+							<token name="FontSize">5</token>
+							<string name="Name">Hint</string>
+							<Ref name="NextSelectionDown">null</Ref>
+							<Ref name="NextSelectionLeft">null</Ref>
+							<Ref name="NextSelectionRight">null</Ref>
+							<Ref name="NextSelectionUp">null</Ref>
+							<UDim2 name="Position">
+								<XS>0</XS>
+								<XO>0</XO>
+								<YS>0.25</YS>
+								<YO>0</YO>
+							</UDim2>
+							<float name="Rotation">0</float>
+							<bool name="Selectable">false</bool>
+							<Ref name="SelectionImageObject">null</Ref>
+							<UDim2 name="Size">
+								<XS>0.224999994</XS>
+								<XO>0</XO>
+								<YS>0.5</YS>
+								<YO>0</YO>
+							</UDim2>
+							<token name="SizeConstraint">0</token>
+							<string name="Text">Editor Path</string>
+							<Color3 name="TextColor3">4293980400</Color3>
+							<bool name="TextScaled">true</bool>
+							<Color3 name="TextStrokeColor3">4278190080</Color3>
+							<float name="TextStrokeTransparency">1</float>
+							<float name="TextTransparency">0</float>
+							<bool name="TextWrapped">true</bool>
+							<token name="TextXAlignment">1</token>
+							<token name="TextYAlignment">1</token>
+							<bool name="Visible">true</bool>
+							<int name="ZIndex">1</int>
+						</Properties>
+					</Item>
+					<Item class="TextBox" referent="RBX78D11FD7961D4B46A2440FB71CA4BBE3">
+						<Properties>
+							<bool name="Active">true</bool>
+							<Color3 name="BackgroundColor3">4294967295</Color3>
+							<float name="BackgroundTransparency">1</float>
+							<Color3 name="BorderColor3">4279970357</Color3>
+							<int name="BorderSizePixel">1</int>
+							<bool name="ClearTextOnFocus">true</bool>
+							<bool name="ClipsDescendants">false</bool>
+							<bool name="Draggable">false</bool>
+							<token name="Font">3</token>
+							<token name="FontSize">5</token>
+							<bool name="MultiLine">false</bool>
+							<string name="Name">Box</string>
+							<Ref name="NextSelectionDown">null</Ref>
+							<Ref name="NextSelectionLeft">null</Ref>
+							<Ref name="NextSelectionRight">null</Ref>
+							<Ref name="NextSelectionUp">null</Ref>
+							<UDim2 name="Position">
+								<XS>0.25</XS>
+								<XO>0</XO>
+								<YS>0.25</YS>
+								<YO>0</YO>
+							</UDim2>
+							<float name="Rotation">0</float>
+							<bool name="Selectable">true</bool>
+							<Ref name="SelectionImageObject">null</Ref>
+							<UDim2 name="Size">
+								<XS>0.725000024</XS>
+								<XO>0</XO>
+								<YS>0.5</YS>
+								<YO>0</YO>
+							</UDim2>
+							<token name="SizeConstraint">0</token>
+							<string name="Text">C:\Program Files\Sublime Text 3\sublime_text.exe</string>
+							<Color3 name="TextColor3">4293980400</Color3>
+							<bool name="TextScaled">true</bool>
+							<Color3 name="TextStrokeColor3">4278190080</Color3>
+							<float name="TextStrokeTransparency">1</float>
+							<float name="TextTransparency">0</float>
+							<bool name="TextWrapped">true</bool>
+							<token name="TextXAlignment">0</token>
+							<token name="TextYAlignment">1</token>
+							<bool name="Visible">true</bool>
+							<int name="ZIndex">1</int>
+						</Properties>
+						<Item class="Frame" referent="RBX4001B09FA64A4F61BCF7545B7CDDF4FB">
+							<Properties>
+								<bool name="Active">false</bool>
+								<Color3 name="BackgroundColor3">4294967295</Color3>
+								<float name="BackgroundTransparency">0.800000012</float>
+								<Color3 name="BorderColor3">4279970357</Color3>
+								<int name="BorderSizePixel">0</int>
+								<bool name="ClipsDescendants">false</bool>
+								<bool name="Draggable">false</bool>
+								<string name="Name">Line</string>
+								<Ref name="NextSelectionDown">null</Ref>
+								<Ref name="NextSelectionLeft">null</Ref>
+								<Ref name="NextSelectionRight">null</Ref>
+								<Ref name="NextSelectionUp">null</Ref>
+								<UDim2 name="Position">
+									<XS>0</XS>
+									<XO>0</XO>
+									<YS>1</YS>
+									<YO>0</YO>
+								</UDim2>
+								<float name="Rotation">0</float>
+								<bool name="Selectable">false</bool>
+								<Ref name="SelectionImageObject">null</Ref>
+								<UDim2 name="Size">
+									<XS>1</XS>
+									<XO>0</XO>
+									<YS>0</YS>
+									<YO>1</YO>
+								</UDim2>
+								<token name="SizeConstraint">0</token>
+								<token name="Style">0</token>
+								<bool name="Visible">true</bool>
+								<int name="ZIndex">1</int>
+							</Properties>
+						</Item>
+					</Item>
+				</Item>
+				<Item class="TextLabel" referent="RBX9AE0028EE24241F98410D6EAB1109C39">
+					<Properties>
+						<bool name="Active">false</bool>
+						<Color3 name="BackgroundColor3">4294967295</Color3>
+						<float name="BackgroundTransparency">1</float>
+						<Color3 name="BorderColor3">4279970357</Color3>
+						<int name="BorderSizePixel">1</int>
+						<bool name="ClipsDescendants">false</bool>
+						<bool name="Draggable">false</bool>
+						<token name="Font">3</token>
+						<token name="FontSize">5</token>
+						<string name="Name">Warning</string>
+						<Ref name="NextSelectionDown">null</Ref>
+						<Ref name="NextSelectionLeft">null</Ref>
+						<Ref name="NextSelectionRight">null</Ref>
+						<Ref name="NextSelectionUp">null</Ref>
+						<UDim2 name="Position">
+							<XS>0.0500000007</XS>
+							<XO>0</XO>
+							<YS>0.800000012</YS>
+							<YO>0</YO>
+						</UDim2>
+						<float name="Rotation">0</float>
+						<bool name="Selectable">false</bool>
+						<Ref name="SelectionImageObject">null</Ref>
+						<UDim2 name="Size">
+							<XS>0.600000024</XS>
+							<XO>0</XO>
+							<YS>0.100000001</YS>
+							<YO>0</YO>
+						</UDim2>
+						<token name="SizeConstraint">0</token>
+						<string name="Text">Port must be a number between 1 and 65535</string>
+						<Color3 name="TextColor3">4293980400</Color3>
+						<bool name="TextScaled">true</bool>
+						<Color3 name="TextStrokeColor3">4278190080</Color3>
+						<float name="TextStrokeTransparency">1</float>
+						<float name="TextTransparency">0</float>
+						<bool name="TextWrapped">true</bool>
+						<token name="TextXAlignment">1</token>
+						<token name="TextYAlignment">1</token>
+						<bool name="Visible">true</bool>
+						<int name="ZIndex">1</int>
+					</Properties>
+				</Item>
+				<Item class="Frame" referent="RBX5F750F25796146B4AB67271202CA1C79">
+					<Properties>
+						<bool name="Active">false</bool>
+						<Color3 name="BackgroundColor3">4294967295</Color3>
+						<float name="BackgroundTransparency">0.899999976</float>
+						<Color3 name="BorderColor3">4279970357</Color3>
+						<int name="BorderSizePixel">0</int>
+						<bool name="ClipsDescendants">false</bool>
+						<bool name="Draggable">false</bool>
+						<string name="Name">Backing</string>
+						<Ref name="NextSelectionDown">null</Ref>
+						<Ref name="NextSelectionLeft">null</Ref>
+						<Ref name="NextSelectionRight">null</Ref>
+						<Ref name="NextSelectionUp">null</Ref>
+						<UDim2 name="Position">
+							<XS>0</XS>
+							<XO>0</XO>
+							<YS>0.200000003</YS>
+							<YO>0</YO>
+						</UDim2>
+						<float name="Rotation">0</float>
+						<bool name="Selectable">false</bool>
+						<Ref name="SelectionImageObject">null</Ref>
+						<UDim2 name="Size">
+							<XS>1</XS>
+							<XO>0</XO>
+							<YS>0.5</YS>
+							<YO>0</YO>
+						</UDim2>
+						<token name="SizeConstraint">0</token>
+						<token name="Style">0</token>
+						<bool name="Visible">true</bool>
+						<int name="ZIndex">1</int>
+					</Properties>
+				</Item>
+			</Item>
+		</Item>
+	</Item>
+	<Item class="ModuleScript" referent="RBX6111DD1C7E694A349B13303731569B9C">
+		<Properties>
+			<Content name="LinkedSource"><null></null></Content>
+			<string name="Name">NetworkBridge</string>
+			<string name="ScriptGuid"></string>
+			<ProtectedString name="Source"><![CDATA[-- Responsible for interacting with the file system web server.
+
+--------------------
+----- Services -----
+--------------------
+local HttpService = game:GetService("HttpService")
+
+---------------------
+----- Constants -----
+---------------------
+-- How many requests can be sent in a minute. Exceeding 500 will cause HttpService stalls.
+-- A limit less than 500 ensures that other HttpService-using plugins won't be drowned out by this.
+local REQUEST_LIMIT = 250
+
+-- How long to wait after a HttpService call limit overrun.
+local REQUEST_LIMIT_COOLDOWN = 15
+
+-- How many times to (re)try a request before failing. Should stop one-off HttpService errors.
+local REQUEST_TRIES = 2
+
+-- How long a request is considered 'active' and counting towards the limit
+local REQUEST_COOLDOWN = 60
+
+-- How long, in seconds, between request cooldown steps
+local STEP_DELAY = 1
+
+-- Local URL
+local BASE_URL = "http://localhost:%d/%s"
+
+---------------------
+----- Variables -----
+---------------------
+-- How many queries were executed in the past 60 seconds
+local requestsUsed = 0
+
+-- How many HTTP errors have we encountered
+local errorCount = 0
+
+-- Records the times (via tick) of requests so the usage counter can be updated
+local requestTimes = {}
+
+-- Whether the step thread is currently running
+local stepping = false
+
+---------------------
+----- Functions -----
+---------------------
+local function StepQueue()
+	local current = tick()
+	
+	for i = #requestTimes, 1, -1 do
+		local requestTime = requestTimes[i]
+		
+		if current - requestTime > REQUEST_COOLDOWN then
+			requestsUsed = requestsUsed - 1
+			table.remove(requestTimes, i)
+		end
+	end
+end
+
+local function TryStartStepper()
+	if stepping then
+		return
+	end
+	
+	spawn(function()
+		stepping = true
+		
+		while stepping do
+			StepQueue()
+			stepping = #requestTimes > 0
+			wait(STEP_DELAY)
+		end
+	end)
+end
+
+local function PushRequestTime(requestTime)
+	requestsUsed = requestsUsed + 1
+	table.insert(requestTimes, requestTime)
+	TryStartStepper()
+end
+
+local function MakeRequest(url, parameters)
+	-- todo: better method?
+	if requestsUsed > REQUEST_LIMIT then
+		while requestsUsed > REQUEST_LIMIT do
+			wait(0)
+		end
+	end
+	
+	local success, message
+	local failCount = 0
+	
+	while failCount < REQUEST_TRIES do
+		-- rather than making a closure or a new function, just call it with HttpService
+		success, message = pcall(HttpService.PostAsync, HttpService, url, parameters, Enum.HttpContentType.ApplicationUrlEncoded)
+		PushRequestTime(tick())
+		
+		if not success then
+			-- Didn't just run into a HttpService stall
+			if message ~= "Number of requests exceeded limit" then
+				errorCount = errorCount + 1
+				failCount = failCount + 1
+			else
+				wait(REQUEST_LIMIT_COOLDOWN)
+			end
+		else
+			break
+		end
+	end
+	
+	return success, message
+end
+
+local function FormatUrl(port, target, arguments)
+	local argumentString = ""
+	
+	if arguments then
+		-- Temporary dumping table
+		local argumentStrings = {}
+		
+		-- Format arguments in normal form
+		for key, value in pairs(arguments) do
+			table.insert(argumentStrings, key.."="..HttpService:UrlEncode(tostring(value)))
+		end
+		
+		-- Generate argument string
+		argumentString = table.concat(argumentStrings, "&")
+	end
+	
+	return BASE_URL:format(port, target), argumentString
+end
+
+-------------------
+----- Library -----
+-------------------
+local NetworkBridge = {}
+
+function NetworkBridge.OpenScript(port, uuid, body, editor)
+	local url, argString = FormatUrl(port, "open", { uuid = uuid; body = body; editor = editor; })
+	return MakeRequest(url, argString)
+end
+
+function NetworkBridge.GetChanges(port)
+	local url = FormatUrl(port, "changes")
+	return MakeRequest(url, "")
+end
+
+function NetworkBridge.PushLocalEdit(port, uuid, body)
+	local url, argString = FormatUrl(port, "rbxedit", { uuid = uuid; body = body; })
+	return MakeRequest(url, argString)
+end
+
+return NetworkBridge]]></ProtectedString>
+		</Properties>
+	</Item>
+</roblox>
