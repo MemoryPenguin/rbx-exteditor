@@ -170,7 +170,7 @@ func main() {
 			uuid, _ := url.QueryUnescape(request.PostFormValue("uuid"))
 
 			if scr, ok := ctx.Scripts[uuid]; ok {
-				body, _ := url.QueryEscape(request.PostFormValue("body"))
+				body, _ := url.QueryUnescape(request.PostFormValue("body"))
 				ctx.RbxEdits[uuid] = struct{}{}
 
 				err := ioutil.WriteFile(scr.FsPath, []byte(body), 0644)
