@@ -6,9 +6,12 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path"
+	"path/filepath"
+	"strings"
 
 	"github.com/fsnotify/fsnotify"
 )
@@ -74,9 +77,7 @@ func main() {
 				select {
 				case event := <-ctx.ScriptWatcher.Events:
 					if event.Op&fsnotify.Write == fsnotify.Write {
-						log.Printf("Edit to %s\n", event.Name)
-
-						uuid := path.Base(event.Name)
+						uuid := strings.TrimSuffix(filepath.Base(event.Name), filepath.Ext(event.Name))
 						log.Printf("Edit to %s", uuid)
 					}
 				}
@@ -89,8 +90,8 @@ func main() {
 			if _, ok := ctx.Scripts[uuid]; ok {
 				fmt.Fprint(response, "failure: already registered\n")
 			} else {
-				body := request.PostFormValue("body")
-				scriptPath := path.Join(ctx.DirPath, uuid, ".rbxs")
+				body, _ := url.QueryUnescape(request.PostFormValue("body"))
+				scriptPath := path.Join(ctx.DirPath, uuid+".rbxs")
 
 				err := ioutil.WriteFile(scriptPath, []byte(body), 0644)
 
@@ -106,7 +107,9 @@ func main() {
 					ctx.Scripts[uuid] = scr
 					ctx.ScriptWatcher.Add(scriptPath)
 
-					cmd := exec.Command(request.PostFormValue("editor"), scriptPath)
+					editorPath, _ := url.QueryUnescape(request.PostFormValue("editor"))
+
+					cmd := exec.Command(editorPath, scriptPath)
 					err := cmd.Start()
 
 					if err != nil {
