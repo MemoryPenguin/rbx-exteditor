@@ -129,11 +129,6 @@ func main() {
 			}
 		})
 
-		http.HandleFunc("/test", func(response http.ResponseWriter, request *http.Request) {
-			field := request.PostFormValue("field")
-			fmt.Println(field)
-		})
-
 		http.ListenAndServe("localhost:8080", nil)
 	}
 }
