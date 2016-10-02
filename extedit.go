@@ -74,7 +74,7 @@ func main() {
 	changes := make(map[string]struct{})
 
 	if err != nil {
-		fmt.Printf("Unable to acquire context: %s\n", err)
+		log.Printf("Unable to acquire context: %s\n", err)
 	} else {
 		defer destroyContext(ctx)
 
@@ -86,7 +86,7 @@ func main() {
 			os.Exit(0)
 		}()
 
-		fmt.Printf("External edit agent has acquired context. Temporary files will be stored in %s.\n", ctx.DirPath)
+		log.Printf("External edit agent has acquired context. Temporary files will be stored in %s.\n", ctx.DirPath)
 
 		go func() {
 			for {
@@ -135,7 +135,7 @@ func main() {
 
 					openFile(scriptPath, editorPath)
 
-					fmt.Printf("Opened UUID %s at FS path %s\n", uuid, scriptPath)
+					log.Printf("Opened UUID %s at FS path %s\n", uuid, scriptPath)
 					fmt.Fprintf(response, "success: new")
 				}
 			}
@@ -179,7 +179,7 @@ func main() {
 					log.Fatalf("Error writing to file: %s\n", err)
 				}
 			} else {
-				fmt.Printf("Got rbx edit for unopened UUID %s\n", uuid)
+				log.Printf("Got rbx edit for unopened UUID %s\n", uuid)
 				fmt.Fprintf(response, "failure: %s is not opened by this host", uuid)
 			}
 		})
